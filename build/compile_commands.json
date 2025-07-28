@@ -1,0 +1,44 @@
+[
+{
+  "directory": "/home/logan/CodeProjects/C_Compiller/build",
+  "command": "clang-19 -I/home/logan/CodeProjects/C_Compiller/include -std=c2x -fdiagnostics-color=always -O0 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fsanitize=signed-integer-overflow -o CMakeFiles/crapiler.dir/source/helpers.c.o -c /home/logan/CodeProjects/C_Compiller/source/helpers.c",
+  "file": "/home/logan/CodeProjects/C_Compiller/source/helpers.c",
+  "output": "CMakeFiles/crapiler.dir/source/helpers.c.o"
+},
+{
+  "directory": "/home/logan/CodeProjects/C_Compiller/build",
+  "command": "clang-19 -I/home/logan/CodeProjects/C_Compiller/include -std=c2x -fdiagnostics-color=always -O0 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fsanitize=signed-integer-overflow -o CMakeFiles/crapiler.dir/source/lexer.c.o -c /home/logan/CodeProjects/C_Compiller/source/lexer.c",
+  "file": "/home/logan/CodeProjects/C_Compiller/source/lexer.c",
+  "output": "CMakeFiles/crapiler.dir/source/lexer.c.o"
+},
+{
+  "directory": "/home/logan/CodeProjects/C_Compiller/build",
+  "command": "clang-19 -I/home/logan/CodeProjects/C_Compiller/include -std=c2x -fdiagnostics-color=always -O0 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fsanitize=signed-integer-overflow -o CMakeFiles/crapiler.dir/source/logger.c.o -c /home/logan/CodeProjects/C_Compiller/source/logger.c",
+  "file": "/home/logan/CodeProjects/C_Compiller/source/logger.c",
+  "output": "CMakeFiles/crapiler.dir/source/logger.c.o"
+},
+{
+  "directory": "/home/logan/CodeProjects/C_Compiller/build",
+  "command": "clang-19 -I/home/logan/CodeProjects/C_Compiller/include -std=c2x -fdiagnostics-color=always -O0 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fsanitize=signed-integer-overflow -o CMakeFiles/crapiler.dir/source/main.c.o -c /home/logan/CodeProjects/C_Compiller/source/main.c",
+  "file": "/home/logan/CodeProjects/C_Compiller/source/main.c",
+  "output": "CMakeFiles/crapiler.dir/source/main.c.o"
+},
+{
+  "directory": "/home/logan/CodeProjects/C_Compiller/build",
+  "command": "clang-19 -I/home/logan/CodeProjects/C_Compiller/include -std=c2x -fdiagnostics-color=always -O0 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fsanitize=signed-integer-overflow -o CMakeFiles/crapiler.dir/source/node.c.o -c /home/logan/CodeProjects/C_Compiller/source/node.c",
+  "file": "/home/logan/CodeProjects/C_Compiller/source/node.c",
+  "output": "CMakeFiles/crapiler.dir/source/node.c.o"
+},
+{
+  "directory": "/home/logan/CodeProjects/C_Compiller/build",
+  "command": "clang-19 -I/home/logan/CodeProjects/C_Compiller/include -std=c2x -fdiagnostics-color=always -O0 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fsanitize=signed-integer-overflow -o CMakeFiles/crapiler.dir/source/parser.c.o -c /home/logan/CodeProjects/C_Compiller/source/parser.c",
+  "file": "/home/logan/CodeProjects/C_Compiller/source/parser.c",
+  "output": "CMakeFiles/crapiler.dir/source/parser.c.o"
+},
+{
+  "directory": "/home/logan/CodeProjects/C_Compiller/build",
+  "command": "clang-19 -I/home/logan/CodeProjects/C_Compiller/include -std=c2x -fdiagnostics-color=always -O0 -Wall -Wextra -Wpedantic -Werror -g -fsanitize=address,undefined -fsanitize=signed-integer-overflow -o CMakeFiles/crapiler.dir/source/token.c.o -c /home/logan/CodeProjects/C_Compiller/source/token.c",
+  "file": "/home/logan/CodeProjects/C_Compiller/source/token.c",
+  "output": "CMakeFiles/crapiler.dir/source/token.c.o"
+}
+]
