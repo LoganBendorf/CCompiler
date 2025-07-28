@@ -1,3 +1,0 @@
-/home/logan/CodeProjects/C_Compiller/build/CMakeFiles/crapiler.dir
-/home/logan/CodeProjects/C_Compiller/build/CMakeFiles/edit_cache.dir
-/home/logan/CodeProjects/C_Compiller/build/CMakeFiles/rebuild_cache.dir
