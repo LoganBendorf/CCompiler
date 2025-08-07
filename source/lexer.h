@@ -4,5 +4,5 @@
 #include "structs.h"
 
 
-void lex(const string* set_input);
+[[nodiscard]] bool lex(const string* set_input);
 

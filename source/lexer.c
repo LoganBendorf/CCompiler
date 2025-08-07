@@ -8,9 +8,30 @@
 
 #include <complex.h>
 #include <ctype.h>
+#include <float.h>
 #include <stddef.h>
 #include <string.h>
 
+
+
+#define LOG_ERR(fmt, ...) \
+    do { \
+    fprintf(stderr, "CODEGEN ERROR at %s:%d:%s " fmt "\n%s", __FILE__, __LINE__, RED() __VA_OPT__(,) __VA_ARGS__, RESET()); \
+    } while(0)
+
+
+
+typedef struct {
+    const bool is_error;
+    union {
+        const size_t size_t_value;
+        const string error_msg;
+    };
+} expect_size_t;
+
+
+extern bool DEBUG;
+extern bool TEST;
 
 extern token_stack g_token_stack;
 
@@ -44,22 +65,25 @@ size_t chars_till_line_end() {
 
 
 // Should be dumb, complicated numbers should be constructed in the PARSER (i.e decimals, negatives)
-static size_t read_number() {
+static expect_size_t read_number() {
+
     bool num_was_read = false;
     const size_t start = input_pos;
+
     while (input_pos < input->size && isdigit(cur_char())) {
         num_was_read = true;
         input_pos++;
     }
 
     if (input_pos < input->size && isalpha(cur_char())) {
-        FATAL_ERROR("Invalid identifier, can not start with number, line '%.*s'", (int) chars_till_line_end(), line_start);
+        LOG_ERR("Invalid identifier, can not start with number, line '%.*s'", (int) chars_till_line_end(), line_start);
+        return (expect_size_t){.is_error=true};
     }
 
     if (num_was_read) {
-        return start;
+        return (expect_size_t){.is_error=false, {start}};
     } else {
-        return SIZE_MAX;
+        return (expect_size_t){.is_error=true};
     }
 }
 
@@ -75,7 +99,7 @@ static size_t read_string() {
 }
 
 
-void lex(const string* set_input) {
+bool lex(const string* set_input) {
     input = set_input;
     input_pos = 0;
     line = 0;
@@ -96,9 +120,25 @@ void lex(const string* set_input) {
     case ' ': col++; input_pos++; break;
     case '\t': col+= 4 /*???*/; input_pos++; break;
 
+    case '-': {
+        input_pos++;
+        if (input_pos < input->size && cur_char() == '-') {
+            add_token(DECREMENT, (string){"--", 2});
+            input_pos++;
+            col++;
+        } else {
+            add_token(MINUS, (string){"-", 1});
+        } 
+    } break;
+    case '~': {
+        add_token(BITWISE_COMPLEMENT, (string){"~", 1});
+        input_pos++;
+        col++;
+    } break;
     case '/': {
         if (input_pos + 1 >= input->size) {
-            FATAL_ERROR("Singular '/' on line '%.*s'", (int) chars_till_line_end(), line_start);
+            LOG_ERR("Singular '/' on line '%.*s'", (int) chars_till_line_end(), line_start);
+            return false;
         } 
 
         input_pos++;
@@ -110,7 +150,8 @@ void lex(const string* set_input) {
             }
         } else if (cur_char() == '*') {
             if (input_pos + 1 >= input->size) {
-                FATAL_ERROR("'/**/' comment not terminated, started on line '%.*s'", (int) chars_till_line_end(), line_start);
+                LOG_ERR("'/**/' comment not terminated, started on line '%.*s'", (int) chars_till_line_end(), line_start);
+                return false;
             } 
 
             while (!(cur_char() == '*' && next_char() == '/')) {
@@ -123,11 +164,13 @@ void lex(const string* set_input) {
 
             input_pos += 2;
         } else {
-            FATAL_ERROR("Singular '/' on line '%.*s'", (int) chars_till_line_end(), line_start);
+            LOG_ERR("Singular '/' on line '%.*s'", (int) chars_till_line_end(), line_start);
+            return false;
         }
 
         if (!multi_line_comment_terminated) {
-            FATAL_ERROR("'/**/' comment not terminated, started on line '%.*s'", (int) chars_till_line_end(), line_start);
+            LOG_ERR("'/**/' comment not terminated, started on line '%.*s'", (int) chars_till_line_end(), line_start);
+            return false;
         }
 
     } break;
@@ -146,14 +189,15 @@ void lex(const string* set_input) {
         if (isalpha(cur_char())) {
             const size_t start = read_string();
             if (input_pos == start) {
-                FATAL_ERROR("Failed to read string, %s", input->data + start);
+                LOG_ERR("Failed to read string, %s", input->data + start);
+                return false;
             }
 
             const string word = {input->data + start, input_pos - start};
 
             bool is_keyword = false;
             const string_span token_strs = token_span();
-            for (size_t i = KEYWORD_START; i < token_strs.size; i++) {
+            for (size_t i = KEYWORD_START; i < KEYWORD_END; i++) {
 
                 const string token_str = token_strs.strs[i];
                 if (token_str.size == word.size && strncmp(token_str.data, word.data, word.size) == 0) {
@@ -171,22 +215,28 @@ void lex(const string* set_input) {
             col += word.size;
 
         } else if (isdigit(cur_char())) {
-            const size_t start = read_number();
-            if (start == SIZE_MAX) {
-                FATAL_ERROR("Invalid number. Line = %zu , column = %zu", line, col); }
+            const expect_size_t expect_start = read_number();
+            if (expect_start.is_error) {
+                LOG_ERR("Invalid number. Line = %zu , column = %zu", line, col); 
+                return false;
+            }
+
+            const size_t start = expect_start.size_t_value;
 
             const string word = {input->data + start, input_pos - start};
 
             add_token(INT_LIT, word);
             col += word.size;
         } else {
-            FATAL_ERROR("Illegal token (%c) on line '%.*s'", cur_char(), (int) chars_till_line_end(), line_start);
+            LOG_ERR("Illegal token (%c) on line '%.*s'", cur_char(), (int) chars_till_line_end(), line_start);
+            return false;
         }
     }
 
     }
     }
 
+    return true;
 }
 
 
