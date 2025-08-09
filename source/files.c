@@ -19,10 +19,20 @@ extern bool TEST;
 
 
 
-bool write_file(const char* filename, const string output) {
-    FILE *fp = fopen(filename, "w");  // open for writing (creates or truncates)
+bool write_file(const string filename, const string output) {
+
+    const size_t size = filename.size;
+    char* full_filename = calloc(size + 3, sizeof(char));
+    snprintf(full_filename, size + 3, "%.*s.s", (int) filename.size, filename.data);
+    // memcpy(full_filename, filename.data, size);
+    // memcpy(full_filename + size, ".s", 2);
+
+    printf("Assembly file name: %s\n", full_filename);
+
+    FILE *fp = fopen(full_filename, "w");  // open for writing (creates or truncates)
     if (fp == NULL) {
         perror("fopen");
+        free(full_filename);
         return false;
     }
 
@@ -30,6 +40,8 @@ bool write_file(const char* filename, const string output) {
     if (fprintf(fp, "%.*s", (int) output.size, output.data) < 0) {
         perror("fprintf");
         fclose(fp);
+        free(full_filename);
+        free(full_filename);
         return false;
     }
 
@@ -38,15 +50,18 @@ bool write_file(const char* filename, const string output) {
     if (fflush(fp) != 0) {
         perror("fflush");
         fclose(fp);
+        free(full_filename);
         return false;
     }
 
     // 6) fclose: returns zero on success
     if (fclose(fp) != 0) {
         perror("fclose");
+        free(full_filename);
         return false;
     }
 
+    free(full_filename);
     return true;
 }
 
@@ -194,5 +209,58 @@ folder_storage get_tests(const char* path, const size_t capacity, bool* expect_f
         .file_outputs    = file_storage
     };
 }
+
+
+
+
+
+#include <unistd.h>
+#include <sys/wait.h>
+
+// Instead of system()
+int compile_with_gcc(const string filename) {
+
+
+    char asm_file[512];
+    snprintf(asm_file, 512, "%.*s.s", (int) filename.size, filename.data);
+
+    char exe_file[512];
+    snprintf(exe_file, 512, "%.*s", (int) filename.size, filename.data);
+
+
+    pid_t pid = fork();
+    
+    if (pid == 0) {
+        // Child process - replace with gcc
+        const char* args[] = {
+            "gcc",
+            (char*)asm_file,  // Input .s file
+            "-o",
+            (char*)exe_file,    // Output executable
+            NULL                   // Terminator
+        };
+
+        fprintf(stderr, "%s", RED());
+        execvp("gcc", (char* const*) args);  // execvp searches PATH for "gcc"
+        fprintf(stderr, "%s", RESET());
+        fflush(stderr);
+
+        // If we get here, execvp failed
+        perror("execvp failed");
+        return EXIT_FAILURE;
+    } else if (pid > 0) {
+        // Parent process - wait for child
+        int status;
+        waitpid(pid, &status, 0);
+        return WEXITSTATUS(status);  // Return gcc's exit code
+    } else {
+        // Fork failed
+        perror("fork failed");
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
+
 
 

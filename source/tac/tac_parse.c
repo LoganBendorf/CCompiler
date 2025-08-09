@@ -357,6 +357,7 @@ static expect_tac_node_ptr parse_ast_node(const node_ptr nd) {
             ERR_RET_EXPECT_TAC_NODE_PTR("Failed parse AST return statement expression"); }
 
         var_tac_node src;
+        bool expr_contains_dst = false;
         if (!expect_expr_and_src.has_dst) {
             const var_tac_node tmp = make_temporary(); 
             memcpy(&src, &tmp, sizeof(var_tac_node));
@@ -367,11 +368,13 @@ static expect_tac_node_ptr parse_ast_node(const node_ptr nd) {
 
             const var_tac_node tmp = *( (var_tac_node*) expect_expr_and_src.dst.addr );
             memcpy(&src, &tmp, sizeof(var_tac_node));
+
+            expr_contains_dst = true;
         }
 
         const tac_expr_ptr expr = expect_expr_and_src.expr;
 
-        const return_tac_node ret_tac_nd = make_return_tac_node(expr, src);
+        const return_tac_node ret_tac_nd = make_return_tac_node(expr, expr_contains_dst, src);
 
         const expect_tac_node_ptr expect = make_expect_tac_node_ptr((const uint8_t*) &ret_tac_nd);
 

@@ -43,7 +43,7 @@ bool is_operandanble(const asm_node_type type) {
                 {"PROGRAM_ASM_NODE", 16}, {"FUNCTION_ASM_NODE", 17},{"INT_IMMEDIATE_ASM_NODE", 26},
                 {"MOVE_ASM_NODE", 13}, {"RETURN_ASM_NODE", 15}, {"BLOCK_ASM_NODE", 14}, {"UNARY_OP_ASM_NODE", 17},
             {"REGISTER_ASM_NODE", 17}, {"STACK_LOCATION_ASM_NODE", 20}, {"IDENTIFIER_ASM_NODE", 19},
-            {"TEMP_REG_ASM_NODE", 17}
+            {"TEMP_REG_ASM_NODE", 17}, {"ASM_NODE_LINKED_PTR", 19}
     };
     return (string_span){arr, sizeof(arr) / sizeof(arr[0]) };
 }
@@ -78,7 +78,9 @@ asm_node_stack g_asm_node_stack = {8,0, {0}};
     case REGISTER_ASM_NODE:      return allign(sizeof(register_asm_node));      break;
     case UNARY_OP_ASM_NODE:      return allign(sizeof(unary_op_asm_node));      break;
     case BLOCK_ASM_NODE:         return allign(sizeof(block_asm_node));         break;
-    case (TEMP_REG_ASM_NODE):    return allign(sizeof(temp_reg_asm_node));      break;
+    case TEMP_REG_ASM_NODE:      return allign(sizeof(temp_reg_asm_node));      break;
+    case MOVE_ASM_NODE:          return allign(sizeof(move_asm_node));          break;
+    case ASM_NODE_LINKED_PTR:    return allign(sizeof(asm_node_linked_ptr));    break;
 
     default: 
         FATAL_ERROR_STACK_TRACE("Asm Node (%.*s) does not have size available", (int) get_asm_node_string(type).size, get_asm_node_string(type).data);
@@ -166,13 +168,24 @@ void push_g_asm_node_stack(const asm_node_ptr ptr) {
 }
 
 
-
+static int stack_alloc_amt;
 
 static size_t function_asm_node_to_str(const function_asm_node func_asm_nd, char* buf, const size_t buf_size, size_t index) {
 
     const string name = func_asm_nd.name;
 
+    // Function name and global declaration
     index += (size_t)snprintf(buf + index, buf_size - index, "  .globl %.*s\n%.*s:\n", (int) name.size, name.data, (int) name.size, name.data);
+
+    stack_alloc_amt = func_asm_nd.stack_allocate_ammount;
+
+    // Allocate stack
+    if (stack_alloc_amt != 0) {
+        index += (size_t)snprintf(buf + index, buf_size - index, "  # Allocate stack\n");
+        index += (size_t)snprintf(buf + index, buf_size - index, "  pushq %%rbp\n");
+        index += (size_t)snprintf(buf + index, buf_size - index, "  movq %%rsp, %%rbp\n");
+        index += (size_t)snprintf(buf + index, buf_size - index, "  subq $%d, %%rsp\n\n", stack_alloc_amt);
+    }
 
     const block_asm_node body = func_asm_nd.nodes;
     for (size_t i = 0; i < body.nodes.size; i++) {
@@ -182,6 +195,11 @@ static size_t function_asm_node_to_str(const function_asm_node func_asm_nd, char
         index = asm_node_addr_to_str(asm_nd.addr, buf, buf_size, index);
         index += (size_t)snprintf(buf + index, buf_size - index, "\n");
     }
+
+    // Deallocate stack??
+    // if (alloc_amt != 0) {
+    //     index += (size_t)snprintf(buf + index, buf_size - index, "  subq $%d, %%rsp\n", alloc_amt);
+    // }
 
     return index;
 }
@@ -227,8 +245,8 @@ static size_t unary_op_asm_node_to_str(unary_op_asm_node un_op_asm_nd, char* buf
     
     switch (op_type) {
 
-    case BITWISE_COMPLEMENT_OP: index += (size_t)snprintf(buf + index, buf_size - index, "not  "); break;
-    case NEGATE_OP:             index += (size_t)snprintf(buf + index, buf_size - index, "neg  "); break;
+    case BITWISE_COMPLEMENT_OP: index += (size_t)snprintf(buf + index, buf_size - index, "notl "); break;
+    case NEGATE_OP:             index += (size_t)snprintf(buf + index, buf_size - index, "negl "); break;
 
         
     default:  FATAL_ERROR("Cannot convert (%.*s) unary op type to ASM string", (int) get_unary_op_string(op_type).size, get_unary_op_string(op_type).data);
@@ -242,8 +260,6 @@ static size_t unary_op_asm_node_to_str(unary_op_asm_node un_op_asm_nd, char* buf
 }
 
 
-// FIXME Use snprintf
-// TODO probably much easier to just return string ptr, saves a lot of space too
 static size_t asm_node_addr_to_str(const uint8_t* addr, char* buf, const size_t buf_size, size_t index) {
 
     const asm_node_type type = *addr;
@@ -258,13 +274,30 @@ static size_t asm_node_addr_to_str(const uint8_t* addr, char* buf, const size_t 
     case RETURN_ASM_NODE: {
         const return_asm_node ret_asm_nd = *((return_asm_node*) addr);
 
-        const asm_expr_ptr expr = ret_asm_nd.expr;
-        index = asm_node_addr_to_str(expr.addr, buf, buf_size, index);
+        if (ret_asm_nd.expr_contains_dst) {
+            const asm_expr_ptr expr = ret_asm_nd.expr;
+            index = asm_node_addr_to_str(expr.addr, buf, buf_size, index);
+    
+            const move_asm_node   mv_nd      = ret_asm_nd.move_nd;
+            index = move_asm_node_to_str(mv_nd, buf, buf_size, index);
+    
+            if (stack_alloc_amt != 0) {
+                index += (size_t)snprintf(buf + index, buf_size - index, "\n  # Reset stack\n");
+                index += (size_t)snprintf(buf + index, buf_size - index, "  movq %%rbp, %%rsp\n");
+                index += (size_t)snprintf(buf + index, buf_size - index, "  popq %%rbp\n\n");
+            }
 
-        const move_asm_node   mv_nd      = ret_asm_nd.move_nd;
-        index = move_asm_node_to_str(mv_nd, buf, buf_size, index);
+            index += (size_t)snprintf(buf + index, buf_size - index, "  ret");
 
-        index += (size_t)snprintf(buf + index, buf_size - index, "  ret");
+        } else {
+            const asm_expr_ptr expr = ret_asm_nd.expr;
+            index += (size_t)snprintf(buf + index, buf_size - index, "  movl ");
+            index = asm_node_addr_to_str(expr.addr, buf, buf_size, index);
+            index += (size_t)snprintf(buf + index, buf_size - index, ", %%eax\n");
+
+            index += (size_t)snprintf(buf + index, buf_size - index, "  ret");
+        }
+
     } break;
     case FUNCTION_ASM_NODE: {
         const function_asm_node func_asm_nd = *((function_asm_node*) addr);
@@ -296,7 +329,22 @@ static size_t asm_node_addr_to_str(const uint8_t* addr, char* buf, const size_t 
     case TEMP_REG_ASM_NODE: {
         const temp_reg_asm_node temp_reg_asm_nd = *((temp_reg_asm_node*) addr);
         index += (size_t)snprintf(buf + index, buf_size - index,"%.*s", (int) temp_reg_asm_nd.name.size, temp_reg_asm_nd.name.data);
+    } break;
+    case ASM_NODE_LINKED_PTR: {
+        const asm_node_linked_ptr link = *((asm_node_linked_ptr*) addr);
+        index = asm_node_addr_to_str(link.prev.addr, buf, buf_size, index);
+        index = asm_node_addr_to_str(link.cur.addr, buf, buf_size, index);
+    } break;
+    case MOVE_ASM_NODE: {
+        const move_asm_node mv_asm_nd = *((move_asm_node*) addr);
+        const register_asm_node* src = mv_asm_nd.src;
+        const register_asm_node* dst = mv_asm_nd.dst;
 
+        index += (size_t)snprintf(buf + index, buf_size - index, "  movl ");
+        index = asm_node_addr_to_str((const uint8_t*) src, buf, buf_size, index);
+        index += (size_t)snprintf(buf + index, buf_size - index, ", ");
+        index = asm_node_addr_to_str((const uint8_t*) dst, buf, buf_size, index);
+        index += (size_t)snprintf(buf + index, buf_size - index, "\n");
     } break;
 
 
@@ -415,7 +463,7 @@ void print_g_asm_nodes(const string msg) {
 
 
 // Used so temp registers can be transformed later
-[[nodiscard]] static asm_node_stack_ptr place_on_stack(const uint8_t* asm_node_addr) {
+asm_node_stack_ptr place_on_stack(uint8_t* asm_node_addr) {
     push_g_asm_node_stack((asm_node_ptr){asm_node_addr});
 
     const asm_node_stack_ptr stack_ptr = get_top_of_g_asm_node_stack();
@@ -425,6 +473,11 @@ void print_g_asm_nodes(const string msg) {
     return stack_ptr;
 }
 
+
+// asm_node_linked_ptr
+asm_node_linked_ptr make_asm_node_linked_ptr(asm_expr_ptr set_prev, asm_expr_ptr set_cur) {
+    return (asm_node_linked_ptr){ASM_NODE_LINKED_PTR, set_prev, set_cur};
+}
 
 
 // int_immediate_asm_node
@@ -444,7 +497,7 @@ block_asm_node make_block_asm_node(const asm_node_ptr_array set_statements) {
 
 // function_asm_node
 function_asm_node make_function_asm_node(const string set_name, const block_asm_node set_nodes) {
-    return (function_asm_node){FUNCTION_ASM_NODE, set_name, set_nodes};
+    return (function_asm_node){FUNCTION_ASM_NODE, set_name, set_nodes, 0};
 }
 
 // program_asm_node
@@ -460,12 +513,12 @@ stack_loc_asm_node make_stack_loc_asm_node(const int set_position) {
 // register_asm_node. These are automatically placed on stack temp registers can be transformed later.
 register_asm_node* make_register_asm_node(const temp_reg_asm_node set_temp_reg) {
     const register_asm_node reg_asm_nd = (register_asm_node){REGISTER_ASM_NODE, .is_temp=true, .is_stack=false, {.temp_reg=set_temp_reg}};
-    return (register_asm_node*) place_on_stack((const uint8_t*) &reg_asm_nd).addr; // Bruh
+    return (register_asm_node*) place_on_stack((uint8_t*) &reg_asm_nd).addr; // Bruh
 }
 
 register_asm_node* make_register_asm_node_with_stack_loc(const stack_loc_asm_node stack_loc) {
     const register_asm_node reg_asm_nd = (register_asm_node){REGISTER_ASM_NODE, .is_temp=false, .is_stack=true, {.stack_loc=stack_loc}};
-    return (register_asm_node*) place_on_stack((const uint8_t*) &reg_asm_nd).addr; // Bruh
+    return (register_asm_node*) place_on_stack((uint8_t*) &reg_asm_nd).addr; // Bruh
 }
 
 register_asm_node make_register_asm_node_with_stack_loc_dont_place_on_stack(const stack_loc_asm_node stack_loc) {
@@ -474,27 +527,31 @@ register_asm_node make_register_asm_node_with_stack_loc_dont_place_on_stack(cons
 
 register_asm_node* make_register_asm_node_with_x86(const x86_register set_reg) {
     const register_asm_node reg_asm_nd = (register_asm_node){REGISTER_ASM_NODE, .is_temp=false, .is_stack=false, {.reg=set_reg}};
-    return (register_asm_node*) place_on_stack((const uint8_t*) &reg_asm_nd).addr; // Bruh
+    return (register_asm_node*) place_on_stack((uint8_t*) &reg_asm_nd).addr; // Bruh
 }
 
 // unary_op_asm_node
-unary_op_asm_node make_unary_op_asm_node(const unary_op_type op_type, const asm_expr_ptr set_src, const register_asm_node* set_dst) {
+unary_op_asm_node make_unary_op_asm_node(const unary_op_type op_type, const asm_expr_ptr set_src, register_asm_node* set_dst) {
     return (unary_op_asm_node){UNARY_OP_ASM_NODE, .op_type=op_type, .has_prev=false, .src=set_src, .dst_reg=set_dst};
 }
-unary_op_asm_node make_unary_op_asm_node_wth_previous(const unary_op_type op_type, const asm_expr_ptr prev, const asm_expr_ptr set_src, const register_asm_node* set_dst) {
+unary_op_asm_node make_unary_op_asm_node_wth_previous(const unary_op_type op_type, const asm_expr_ptr prev, const asm_expr_ptr set_src, register_asm_node* set_dst) {
     return (unary_op_asm_node){UNARY_OP_ASM_NODE, .op_type=op_type, .has_prev=true, .prev=prev, .src=set_src, .dst_reg=set_dst};
 }
 
 
 
 // move_asm_node
-[[nodiscard]] move_asm_node make_move_asm_node(const register_asm_node* set_src, const register_asm_node* set_dst) {
+[[nodiscard]] move_asm_node make_move_asm_node(register_asm_node* set_src, register_asm_node* set_dst) {
     return (move_asm_node){MOVE_ASM_NODE, set_src, set_dst};
 }
 
 // return_asm_node
 [[nodiscard]] return_asm_node make_return_asm_node(const asm_expr_ptr set_expr, const move_asm_node set_move_nd) {
-    return (return_asm_node){RETURN_ASM_NODE, set_expr, set_move_nd};
+    return (return_asm_node){RETURN_ASM_NODE, set_expr, true, set_move_nd};
+}
+
+[[nodiscard]] return_asm_node make_return_asm_node_without_move(const asm_expr_ptr set_expr) {
+    return (return_asm_node){RETURN_ASM_NODE, set_expr, false, {}};
 }
 
 // identifier_asm_node

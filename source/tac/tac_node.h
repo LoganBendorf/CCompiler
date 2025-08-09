@@ -131,10 +131,11 @@ void print_tac_program(const program_tac_node prog);
 typedef struct {
     const tac_node_type type;
     const tac_expr_ptr  expr;
-    const var_tac_node  src; // Not sure this needs source, pretty sure the expr will have it
+    const bool expr_contains_dst;
+    const var_tac_node  src;
 } return_tac_node;
 
-[[nodiscard]] return_tac_node make_return_tac_node(const tac_expr_ptr set_expr, const var_tac_node set_src);
+[[nodiscard]] return_tac_node make_return_tac_node(const tac_expr_ptr set_expr, const bool expr_contains_dst, const var_tac_node set_src);
 
 typedef struct {
     const tac_node_type type;

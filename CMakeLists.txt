@@ -91,8 +91,8 @@ message(STATUS "Final UNWIND_LIBRARIES: ${UNWIND_LIBRARIES}")
 
 # Sanitizer flags (need for compile and link)
 set(SANITIZER_FLAGS
-    # -fsanitize=address,undefined
-    # -fsanitize=signed-integer-overflow
+    -fsanitize=address,undefined
+    -fsanitize=signed-integer-overflow
 )
 
 # Linker flags specifically for sanitizers

@@ -61,23 +61,6 @@ bool is_tac_stmt(const tac_node_type type) {
     }
 }
 
-// FIXME Not needed?
-// expect_var_tac_node get_tac_dst(const uint8_t* addr) {
-
-//     const tac_node_type type = *addr;
-
-//     switch (type) {
-//     case UNARY_OP_TAC_NODE: {
-//         const unary_op_tac_node un_op_tac_nd = *(unary_op_tac_node*) addr;
-//         return (expect_var_tac_node){.is_error=false,{un_op_tac_nd.dst}};
-//     }
-
-//     default: 
-//         FATAL_ERROR_STACK_TRACE("Could not get destination for TAC type (%.*s)",  (int) get_tac_node_string(type).size, get_tac_node_string(type).data);
-//         return (expect_var_tac_node){.is_error=true};
-//     }
-// }
-
 
 
 tac_node_stack g_tac_node_stack = {8,0, {0}};
@@ -254,9 +237,14 @@ static size_t tac_node_addr_to_str(const uint8_t* addr, char* buf, const size_t 
     } break;
     case RETURN_TAC_NODE: {
         const return_tac_node ret_tac_nd = *((return_tac_node*) addr);
-        index = tac_node_addr_to_str(ret_tac_nd.expr.addr, buf, buf_size, index);
-        // index += (size_t)snprintf(buf + index, buf_size - index,"%.*s", (int) ret_tac_nd.src.name.size, ret_tac_nd.src.name.data);
-        index += (size_t)snprintf(buf + index, buf_size - index,"  ret");
+        if (ret_tac_nd.expr_contains_dst) {
+            index = tac_node_addr_to_str(ret_tac_nd.expr.addr, buf, buf_size, index);
+            index += (size_t)snprintf(buf + index, buf_size - index,"  ret");
+            index += (size_t)snprintf(buf + index, buf_size - index," %.*s)", (int) ret_tac_nd.src.name.size, ret_tac_nd.src.name.data);
+        } else {
+            index += (size_t)snprintf(buf + index, buf_size - index,"  ret ");
+            index = tac_node_addr_to_str(ret_tac_nd.expr.addr, buf, buf_size, index);
+        }
     } break;
 
 
@@ -382,8 +370,8 @@ program_tac_node make_program_tac_node(const function_tac_node set_func) {
 }
 
 // return_tac_node
-return_tac_node make_return_tac_node(const tac_expr_ptr set_expr, const var_tac_node set_src) {
-    return (return_tac_node){RETURN_TAC_NODE, set_expr, set_src};
+return_tac_node make_return_tac_node(const tac_expr_ptr set_expr, const bool expr_contains_dst, const var_tac_node set_src) {
+    return (return_tac_node){RETURN_TAC_NODE, set_expr, expr_contains_dst, set_src};
 }
 
 // identifier_tac_node
