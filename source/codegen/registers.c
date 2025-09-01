@@ -5,6 +5,8 @@
 #include "logger.h"
 #include "structs.h"
 
+#include <stdio.h>
+
 
 
 extern bool DEBUG;

@@ -1,6 +1,8 @@
 
 
 #include "node.h"
+#include "node_mem.h"
+#include "node_size.h"
 
 #include "logger.h"
 #include "token.h"
@@ -11,20 +13,17 @@
 #include <string.h>
 
 
-
 extern bool DEBUG;
 extern bool TEST;
 
+extern node_stack g_node_stack;
 
 
-static size_t prev_stack_push_size;
-
-
-
-static size_t node_addr_to_str(const uint8_t* addr, char* buf, const size_t buf_size, size_t index);
-static string type_node_to_str(const type_node nd);
 
 #define BUFFER_SIZE 1024 * 8
+
+
+static string type_node_to_str(const type_node nd);
 
 
 string_span node_span() {
@@ -46,90 +45,6 @@ string get_node_string(const size_t index) {
     return node_strs.strs[index];
 }
 
-
-
-node_stack g_node_stack = {8,0, {0}};
-
-static size_t allign(const size_t size) {
-    const size_t to_add = size % g_node_stack.allignment;
-    return size + to_add;
-}
-
-static size_t size_of_node(const node_type type) {
-    switch (type) {
-    case RETURN_STATEMENT_NODE: return allign(sizeof(return_statement_node)); break;
-    case INTEGER_CONSTANT_NODE: return allign(sizeof(integer_constant_node)); break;
-    case PROGRAM_NODE:          return allign(sizeof(program_node));          break;
-    case IDENTIFIER_NODE:       return allign(sizeof(identifier_node));       break;
-    case TYPE_NODE:             return allign(sizeof(type_node));             break;
-    case FUNCTION_NODE:         return allign(sizeof(function_node));         break;
-    case UNARY_OP_NODE:         return allign(sizeof(unary_op_node));         break;
-
-    default: 
-        FATAL_ERROR_STACK_TRACE("Node (%.*s) does not have size available", (int) get_node_string(type).size, get_node_string(type).data);
-        return 0;
-    }
-}
-
-[[maybe_unused]] static size_t size_of_node_at_stack_ptr(const node_stack_ptr ptr) {
-    return size_of_node((node_type) *ptr.addr);
-}
-
-static size_t size_of_node_at_ptr(const node_ptr ptr) {
-    return size_of_node((node_type) *ptr.addr);
-}
-
-static node_stack_ptr g_node_stack_top_ptr() {
-    const node_stack_ptr addr = {&g_node_stack.stack[g_node_stack.top], false};
-    return addr;
-}
-
-[[maybe_unused]] static node_stack_ptr pop_g_node_stack() {
-    if (g_node_stack.top == 0) {
-        const node_stack_ptr ret_val = {0, true};
-        return ret_val;
-    }
-
-    const size_t size = prev_stack_push_size;
-    if (size > g_node_stack.top) {
-        FATAL_ERROR_STACK_TRACE("node size to pop is greater than node stack top. Would lead to underflow, bad!!!"); }
-
-    g_node_stack.top -= size;
-
-    return  g_node_stack_top_ptr();
-}
-
-
-node_stack_ptr get_top_of_g_node_stack() {
-    if (g_node_stack.top == 0) {
-        const node_stack_ptr ret_val = {0, true};
-        return ret_val;
-    }
-
-    const size_t size = prev_stack_push_size;
-    if (size > g_node_stack.top) {
-        FATAL_ERROR_STACK_TRACE("Can not get top if global node stack, would lead to underflow. Top = %zu, request size = %zu", g_node_stack.top, size); }
-
-    node_stack_ptr ret = g_node_stack_top_ptr();
-    ret.addr -= size;
-
-    return ret;
-}
-
-    void push_g_node_stack(const node_ptr ptr) {
-    if (ptr.is_none) {
-        FATAL_ERROR_STACK_TRACE("Can't push none pointer"); }
-
-    const size_t size = size_of_node_at_ptr(ptr);
-    if (size + g_node_stack.top >= NODE_STACK_SIZE) {
-        FATAL_ERROR_STACK_TRACE("Stack OOM"); }
-
-    memcpy((void*) g_node_stack_top_ptr().addr,  (void*) ptr.addr, size);
-    
-    g_node_stack.top += size;
-
-    prev_stack_push_size = size;
-}
 
 
 
@@ -164,13 +79,35 @@ static size_t unary_op_node_to_str(const unary_op_node un_op_nd, char* buf, cons
     }
 
     if (!printed_op) {
-        FATAL_ERROR("Cannot print operator of type (%u), yes there's no string for it cope", op_type); }
+        FATAL_ERROR("Cannot print unary operator of type (%.*s)", (int) get_unary_op_string(op_type).size, get_unary_op_string(op_type).data); }
 
     return index;
 }
 
-// FIXME Use snprintf
-static size_t node_addr_to_str(const uint8_t* addr, char* buf, const size_t buf_size, size_t index) {
+static size_t binary_op_node_to_str(const binary_op_node bin_op_nd, char* buf, const size_t buf_size, size_t index) {
+
+    index += (size_t)snprintf(buf + index, buf_size - index, "(");
+    index = node_addr_to_str((const uint8_t*) bin_op_nd.left.addr, buf, buf_size, index);
+    
+    const binary_op_type op_type = bin_op_nd.op_type;
+    switch (op_type) {
+    case ADD_OP: index += (size_t)snprintf(buf + index, buf_size - index, "+"); break;
+    case SUB_OP: index += (size_t)snprintf(buf + index, buf_size - index, "-"); break;
+    case MUL_OP: index += (size_t)snprintf(buf + index, buf_size - index, "*"); break;
+    case DIV_OP: index += (size_t)snprintf(buf + index, buf_size - index, "/"); break;
+    case MOD_OP: index += (size_t)snprintf(buf + index, buf_size - index, "%%"); break;
+    default: FATAL_ERROR("Cannot print binary operator of type (%.*s)", (int) get_binary_op_string(op_type).size, get_binary_op_string(op_type).data);
+    }
+
+    index = node_addr_to_str((const uint8_t*) bin_op_nd.right.addr, buf, buf_size, index);
+    index += (size_t)snprintf(buf + index, buf_size - index, ")");
+
+    return index;
+}
+
+
+
+size_t node_addr_to_str(const uint8_t* addr, char* buf, const size_t buf_size, size_t index) {
 
     const node_type type = *addr;
 
@@ -228,6 +165,10 @@ static size_t node_addr_to_str(const uint8_t* addr, char* buf, const size_t buf_
     case UNARY_OP_NODE: {
         const unary_op_node un_op_nd  = *((unary_op_node*) addr);
         index = unary_op_node_to_str(un_op_nd, buf, buf_size, index);
+    } break;
+    case BINARY_OP_NODE: {
+        const binary_op_node bin_op_nd  = *((binary_op_node*) addr);
+        index = binary_op_node_to_str(bin_op_nd, buf, buf_size, index);
     } break;
 
     default: 
@@ -351,6 +292,12 @@ integer_constant_node make_integer_constant_node_with_str(const string value) {
 unary_op_node make_unary_op_node(const unary_op_type set_op_type, const expr_ptr set_expr) {
     return (unary_op_node){UNARY_OP_NODE, set_op_type, set_expr}; 
 }
+
+// binary_op_node
+binary_op_node make_binary_op_node(const binary_op_type set_op_type, const expr_ptr set_left, const expr_ptr set_right) {
+    return (binary_op_node){BINARY_OP_NODE, set_op_type, set_left, set_right}; 
+}
+
 
 // return_statement_node
 return_statement_node make_return_statement_node(const expr_ptr expr) {

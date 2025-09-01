@@ -5,7 +5,11 @@
 #include "tac_parse.h"
 #include "token.h"
 #include "node.h"
+#include "node_mem.h"
+#include "tac_node.h"
+#include "tac_node_mem.h"
 #include "asm_node.h"
+#include "asm_node_mem.h"
 #include "lexer.h"
 #include "parser.h"
 #include "codegen.h"
@@ -23,14 +27,15 @@ extern tac_node_stack g_instruction_stack;
 extern asm_node_stack g_asm_node_stack;
 
 
-bool DEBUG = false;
-bool TEST  = false;
+extern bool DEBUG;
+extern bool TEST;
 
 
 
 typedef struct {
     bool has_cmd_input;
     string input;
+    string filename;
 
     bool end_after_lex;
     bool end_after_parse;
@@ -54,6 +59,7 @@ static cmd_line_args parse_cmd_args(const int argc, char* argv[]) {
     cmd_line_args args = {
         .has_cmd_input      = false,
         .input              = {},
+        .filename           = {},
         .end_after_lex      = false,
         .end_after_parse    = false,
         .end_after_tac      = false,
@@ -144,6 +150,10 @@ static cmd_line_args parse_cmd_args(const int argc, char* argv[]) {
             if (args.has_cmd_input) {
                 FATAL_ERROR("Command line arguments contain multiple command line inputs"); }
 
+            const string set_filename = (string){arg, strlen(arg) - 2};
+            memcpy(&args.filename, &set_filename, sizeof(string));
+
+
             const string file_input = read_file(arg);
             memcpy(&args.input, &file_input, sizeof(string));
             args.has_cmd_input = true;
@@ -168,6 +178,8 @@ typedef struct {
     const int    int_val;
 } string_int_pair;
 
+static int stack_alloc;
+
 int temp_register_name_to_stack_pos_map(const string name, const bool reset) {
 
     #define TEMP_REG_MAP_SIZE 1024
@@ -179,6 +191,7 @@ int temp_register_name_to_stack_pos_map(const string name, const bool reset) {
     if (reset) { 
         cur_size = 0; 
         stack_pos = 0;
+        stack_alloc = 0;
         return 0;
     }
 
@@ -200,7 +213,8 @@ int temp_register_name_to_stack_pos_map(const string name, const bool reset) {
         if (cur_size == TEMP_REG_MAP_SIZE) {
             FATAL_ERROR_STACK_TRACE("Temp register name to stack position map OOM"); }
         
-        stack_pos -= 4;
+        stack_pos   -= 4;
+        stack_alloc += 4;
         const string_int_pair pair = {name, stack_pos};
         memcpy(&map[cur_size], &pair, sizeof(string_int_pair));
         cur_size++;
@@ -212,47 +226,172 @@ int temp_register_name_to_stack_pos_map(const string name, const bool reset) {
     }
 }
 
-[[nodiscard]] bool replace_temp_register_variables_with_stack_locations(const function_asm_node func) {
 
-    set_elem_size_traversal_index(get_elem_size_index() - 1);
-    set_top_traversal_index(get_g_asm_node_stack_top_value());
 
+
+static void replace_unary_op_asm_node_temp_register(unary_op_asm_node* un_op_asm_nd);
+
+
+
+static void route_temp_register_replacement(uint8_t* addr) {
+    const asm_node_type type = *addr;
+
+    switch (type) {
+    case RETURN_ASM_NODE: {
+        return_asm_node ret_asm_nd = *(return_asm_node*) addr;
+        asm_expr_ptr  expr      = ret_asm_nd.expr;
+        route_temp_register_replacement(expr.addr);
+
+        if (ret_asm_nd.expr_contains_dst) {
+            move_asm_node mv_asm_nd = ret_asm_nd.move_nd;
+    
+            register_asm_node* src = mv_asm_nd.src;
+            route_temp_register_replacement((uint8_t*) src);
+    
+            register_asm_node* dst = mv_asm_nd.dst;
+            route_temp_register_replacement((uint8_t*) dst);            
+        }
+    } break;
+    case UNARY_OP_ASM_NODE: {
+        replace_unary_op_asm_node_temp_register((unary_op_asm_node*) addr);
+    } break;
+    case REGISTER_ASM_NODE: {
+        register_asm_node reg_asm_nd = *(register_asm_node*) addr;
+        if (!reg_asm_nd.is_temp) {
+            break; }
+
+        const int stack_loc = temp_register_name_to_stack_pos_map(reg_asm_nd.temp_reg.name, false);
+
+        const stack_loc_asm_node stack_loc_asm_nd = make_stack_loc_asm_node(stack_loc);
+
+        const register_asm_node stack_reg = make_register_asm_node_with_stack_loc_dont_place_on_stack(stack_loc_asm_nd); // TODO If changing reg_asm_nodes to values, have to change this line and the next. & of * is bad
+
+        memcpy(addr, &stack_reg, sizeof(register_asm_node));
+    } break;
+
+    // Don't care list
+    case INT_IMMEDIATE_ASM_NODE:
+        break;
+
+    default: FATAL_ERROR("Thing I couldn't change (%.*s)", (int) get_asm_node_string(type).size, get_asm_node_string(type).data);
+    }
+}
+
+static void replace_unary_op_asm_node_temp_register(unary_op_asm_node* un_op_asm_nd) {
+
+    if (un_op_asm_nd->has_prev) {
+        route_temp_register_replacement(un_op_asm_nd->prev.addr); }
+
+    register_asm_node* dst_reg_asm_nd = un_op_asm_nd->dst_reg;
+    if (dst_reg_asm_nd->is_temp) {
+        const int stack_loc = temp_register_name_to_stack_pos_map(dst_reg_asm_nd->temp_reg.name, false);
+    
+        const stack_loc_asm_node stack_loc_asm_nd = make_stack_loc_asm_node(stack_loc);
+    
+        const register_asm_node stack_reg = make_register_asm_node_with_stack_loc_dont_place_on_stack(stack_loc_asm_nd);
+    
+        memcpy(dst_reg_asm_nd, &stack_reg, sizeof(register_asm_node));
+    }
+
+    asm_expr_ptr src_expr = un_op_asm_nd->src;
+    route_temp_register_replacement(src_expr.addr);
+}
+
+[[nodiscard]] static bool replace_temp_register_variables_with_stack_locations(const function_asm_node func) {
 
     const bool reset = true;
     temp_register_name_to_stack_pos_map((string){}, reset);
 
-    while (true) {
-        asm_node_stack_ptr stack_elem = pop_g_asm_node_stack();
-        if (stack_elem.is_none) {
-            break; }
+    const size_t  size   = func.nodes.nodes.size;
+    asm_node_ptr* values = func.nodes.nodes.values;
 
-        uint8_t* addr = stack_elem.addr;
-
-        const asm_node_type type = *addr;
-
-        switch (type) {
-        case REGISTER_ASM_NODE: {
-            register_asm_node reg_asm_nd = *(register_asm_node*) stack_elem.addr;
-            if (!reg_asm_nd.is_temp) {
-                continue; }
-
-            const int stack_loc = temp_register_name_to_stack_pos_map(reg_asm_nd.temp_reg.name, false);
-
-            const stack_loc_asm_node stack_loc_asm_nd = make_stack_loc_asm_node(stack_loc);
-
-            const register_asm_node stack_reg = make_register_asm_node_with_stack_loc_dont_place_on_stack(stack_loc_asm_nd);
-
-            memcpy(addr, &stack_reg, sizeof(register_asm_node));
-        } break;
-
-        default: continue;
-        }
+    for (size_t i = 0; i < size; i++) {
+        route_temp_register_replacement(values[i].addr);
     }
 
     return true;
 }
 
 
+
+[[nodiscard]] static register_asm_node* get_scratch_register() {
+    return make_register_asm_node_with_x86(EAX);
+}
+
+static void route_stack_replacement(uint8_t* addr) {
+
+    const asm_node_type type = *addr;
+
+    switch (type) {
+        case RETURN_ASM_NODE: {
+        return_asm_node ret_asm_nd = *(return_asm_node*) addr;
+        asm_expr_ptr expr = ret_asm_nd.expr;
+        route_stack_replacement(expr.addr);
+
+        // move_asm_node mv_asm_nd = ret_asm_nd.move_nd;
+
+        // register_asm_node* src = mv_asm_nd.src;
+        // route_temp_register_replacement((uint8_t*) src);
+
+        // register_asm_node* dst = mv_asm_nd.dst;
+        // route_temp_register_replacement((uint8_t*) dst);
+
+    } break;
+    case UNARY_OP_ASM_NODE: {
+        unary_op_asm_node* un_op_asm_nd = (unary_op_asm_node*) addr;
+
+        // If it doesn't have a previous, then it's something like 'movl $0, -4(%rbp)', so there's no issue
+        if (!un_op_asm_nd->has_prev) {
+            break; }
+
+
+        
+        asm_expr_ptr src = un_op_asm_nd->src; 
+        const asm_node_type src_type = *src.addr;
+        // Because it has previous, assume that it is a register/location type
+        if (src_type != REGISTER_ASM_NODE) {
+            FATAL_ERROR("Unary op source was not register type"); }
+
+        // Generate intermediate step of loading src into scratch register
+        register_asm_node* intermediate_dst  = get_scratch_register();
+        register_asm_node* intermediate_src  = (register_asm_node*) src.addr;
+        move_asm_node      intermediate_move = make_move_asm_node(intermediate_src, intermediate_dst);
+
+
+
+        asm_node_stack_ptr stack_mv_ptr = place_on_asm_node_stack((uint8_t*) &intermediate_move);
+
+        asm_node_linked_ptr link = make_asm_node_linked_ptr(un_op_asm_nd->prev, (asm_expr_ptr){stack_mv_ptr.addr});
+
+        asm_node_stack_ptr stack_link_ptr = place_on_asm_node_stack((uint8_t*) &link);
+
+        un_op_asm_nd->prev = (asm_expr_ptr){stack_link_ptr.addr};
+
+        un_op_asm_nd->src = (asm_expr_ptr) {(uint8_t*) intermediate_dst};
+
+    } break;
+
+    // Don't care list
+    case INT_IMMEDIATE_ASM_NODE: case REGISTER_ASM_NODE:
+        break;
+
+    default: FATAL_ERROR("Thing I couldn't change (%.*s)", (int) get_asm_node_string(type).size, get_asm_node_string(type).data);
+    }
+
+}
+
+// Currently only changes move instructions
+[[nodiscard]] static bool replace_double_stack_operations_with_scratch_register(const function_asm_node func) {
+
+    const size_t  size   = func.nodes.nodes.size;
+    asm_node_ptr* values = func.nodes.nodes.values;
+
+    for (size_t i = 0; i < size; i++) {
+        route_stack_replacement(values[i].addr);
+    }
+
+    return true;
+}
 
 
 
@@ -276,21 +415,17 @@ static int run(const cmd_line_args args) {
 
 
     const bool lex_ok = lex(&args.input);
-    if (!lex_ok) {
-        RUN_ERROR("Lex fail"); }
+    if (!lex_ok) { RUN_ERROR("Lex fail"); }
 
     if (unlikely(DEBUG)) { print_g_tokens(); }
 
-    if (g_token_stack.top == 0) {
-        RUN_ERROR("No tokens generated"); }
+    if (g_token_stack.top == 0) { RUN_ERROR("No tokens generated"); }
 
-    if (args.end_after_lex) {
-        return EXIT_SUCCESS; }
+    if (args.end_after_lex) { return EXIT_SUCCESS; }
 
 
     const expect_program_node expect_program_ast = parse();
-    if (expect_program_ast.is_error) {
-        RUN_ERROR("Parse fail"); }
+    if (expect_program_ast.is_error) { RUN_ERROR("Parse fail"); }
 
     const program_node program_ast = expect_program_ast.node;
 
@@ -298,15 +433,12 @@ static int run(const cmd_line_args args) {
 
     if (unlikely(DEBUG)) { print_program_ast(program_ast); }
 
-    if (g_node_stack.top == 0) {
-        RUN_ERROR("No nodes generated"); }
+    if (g_node_stack.top == 0) { RUN_ERROR("No nodes generated"); }
 
-    if (args.end_after_parse) {
-        return EXIT_SUCCESS; }
+    if (args.end_after_parse) { return EXIT_SUCCESS; }
 
     const expect_program_tac_node expect_tac_program = parse_ast(program_ast);
-    if (expect_tac_program.is_error) {
-        RUN_ERROR("Tac parse fail"); }
+    if (expect_tac_program.is_error) { RUN_ERROR("Tac parse fail"); }
 
     const program_tac_node tac_program = expect_tac_program.node;
 
@@ -314,56 +446,84 @@ static int run(const cmd_line_args args) {
 
     if (unlikely(DEBUG)) { print_tac_program(tac_program); }
 
-    if (g_tac_node_stack.top == 0) {
-        RUN_ERROR("No tac nodes generated"); }
+    if (g_tac_node_stack.top == 0) { RUN_ERROR("No tac nodes generated"); }
 
-    if (args.end_after_tac) {
-        return EXIT_SUCCESS; }
+    if (args.end_after_tac) { return EXIT_SUCCESS; }
 
 
     const expect_program_asm_node expect_asm_prog = codegen(tac_program);
-    if (expect_asm_prog.is_error) {
-        RUN_ERROR("Codegen fail"); }
+    if (expect_asm_prog.is_error) { RUN_ERROR("Codegen fail"); }
 
-    const program_asm_node asm_prog = expect_asm_prog.node;
+    program_asm_node asm_prog = expect_asm_prog.node;
 
     if (unlikely(DEBUG)) { print_g_asm_nodes((string){}); }
 
     if (unlikely(DEBUG)) { print_asm_program(asm_prog, (string){"Before temp replacement ---", 27}); }
 
-    if (g_asm_node_stack.top == 0) {
-        RUN_ERROR("No asm_nodes generated"); }
+    if (g_asm_node_stack.top == 0) { RUN_ERROR("No asm_nodes generated"); }
 
-    if (args.end_after_codegen) {
-        return EXIT_SUCCESS; }
+    // Maybe add a flag to stop here?
 
-
-    const bool rc = replace_temp_register_variables_with_stack_locations(asm_prog.main_function);
-    if (!rc) {
+    const bool temp_replace_rc = replace_temp_register_variables_with_stack_locations(asm_prog.main_function);
+    if (!temp_replace_rc) {
         RUN_ERROR("Failed to replace temp registers"); }
 
-    // if (unlikely(DEBUG)) { print_g_asm_nodes((string){"After temp replacement ---", 26}); }
+    if (unlikely(DEBUG)) { print_g_asm_nodes((string){"After temp replacement ---", 26}); }
 
     if (unlikely(DEBUG)) { print_asm_program(asm_prog, (string){"After temp replacement ---", 26}); }
-    
 
+    const int round_stack_alloc =  stack_alloc != 0 ? (8 - stack_alloc % 8) : 0;
+    asm_prog.main_function.stack_allocate_ammount = stack_alloc + round_stack_alloc;
+
+
+    const bool double_replace_rc = replace_double_stack_operations_with_scratch_register(asm_prog.main_function); // <--- Here
+    if (!double_replace_rc) {
+        RUN_ERROR("Failed to replace double stack operations"); }
+
+    if (unlikely(DEBUG)) { print_g_asm_nodes((string){"After double stack operations replacement ---", 45}); }
+
+    if (unlikely(DEBUG)) { print_asm_program(asm_prog, (string){"After double stack operations replacement ---", 45}); }
+
+
+
+    if (args.end_after_codegen) { return EXIT_SUCCESS; }
+    
 
 
     const string assembly = get_assembly(asm_prog);
     
-    const char* filename = "main.s";
+    
+    const string filename = args.filename.size == 0 ? (string){"main", 4} : args.filename;
+
+    const bool ok = write_file(filename, assembly);
+    if (!ok) { RUN_ERROR("Failed to write to assembly file"); } 
+
+    if (unlikely(DEBUG)) { 
+        printf("Assembly written to %.*s.s\n", (int) filename.size, filename.data); }
 
     if (args.end_after_assembly) {
-        if (unlikely(DEBUG)) { printf("Compilation finished at assembly generation. Assembly written to %s\n", filename); }
-        const bool ok = write_file(filename, assembly);
-        if (!ok) {
-            RUN_ERROR("Failed to write to file");
-        } else {
-            return EXIT_SUCCESS; 
-        }
+        if (unlikely(DEBUG)) { printf("Compilation finished at assembly generation.\n"); }
+        return EXIT_SUCCESS;
     }
 
-    if (unlikely(DEBUG)) { printf("Compilation finished at assembly generation, no file emitted\n"); }
+
+
+    char gcc_cmd_buffer[512];
+
+    snprintf(gcc_cmd_buffer, 512, "gcc \"%.*s.s\" -o \"%.*s\"", 
+        (int) args.filename.size, args.filename.data,
+        (int) args.filename.size, args.filename.data
+    );
+
+    printf("Compile command: %s\n", gcc_cmd_buffer);
+
+    system(gcc_cmd_buffer);
+
+    // const int compile_rc = compile_with_gcc(args.filename);
+    // if (compile_rc != EXIT_SUCCESS) {
+    //     RUN_ERROR("Failed to compile assembly file into executable"); }
+
+    if (unlikely(DEBUG)) { printf("Compiled file written to %.*s\n", (int) args.filename.size, args.filename.data); }
 
     return EXIT_SUCCESS;
 }
@@ -423,26 +583,28 @@ static int run_tests([[maybe_unused]] const cmd_line_args g_args, const char* te
         if (strncmp((filename_str.data + filename_str.size) - 2, ".c", 2) != 0) {
             TEST_RUN_ERROR("Test file (%.*s) did not end in .c", (int) filename_str.size, filename_str.data); }
 
-        const int line_size = 50;
+        const int line_size = 64;
 
-        const bool   expect_fail      = expect_fail_ids[i];
-        const char*  expect_fail_data = expect_fail ? expect_fail_str.data : "";
+        const bool  expect_fail      = expect_fail_ids[i];
+        const char* expect_fail_data = expect_fail ? expect_fail_str.data : "";
         
         const int expect_fail_size = expect_fail ? expect_fail_str.size : 0;
 
-        const int pad_size = line_size - (int) filename_str.size - expect_fail_size - (expect_fail ? 1 : 0);
+        int pad_size = line_size - (int) filename_str.size - expect_fail_size - (expect_fail ? 1 : 0);
+        if (pad_size < 2) { pad_size = 2; }
 
         printf("%.*s %.*s%.*s%.*s\n", 
             (int) filename_str.size, filename_str.data,
             (int) expect_fail_size, expect_fail_data,
             (int) expect_fail ? 1 : 0, " ",
-            (int) pad_size, padding);
+                  pad_size, padding);
 
         const string input = file_output_str;
 
         const cmd_line_args args = {
             .has_cmd_input      = true,
             .input              = input,
+            .filename           = (string){filename_str.data, filename_str.size-2},
             .end_after_lex      = g_args.end_after_lex,
             .end_after_parse    = g_args.end_after_parse,
             .end_after_tac      = g_args.end_after_tac,

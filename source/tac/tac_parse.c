@@ -3,6 +3,7 @@
 #include "tac_parse.h"
 
 #include "tac_node.h"
+#include "tac_node_mem.h"
 #include "logger.h"
 #include "node.h"
 #include "tac_node.h"
@@ -15,7 +16,7 @@
 extern bool DEBUG;
 extern bool TEST;
 
-extern node_stack g_tac_node_stack;
+extern tac_node_stack g_tac_node_stack;
 
 
 static size_t temp_vars_allocated;
@@ -54,8 +55,11 @@ static size_t temp_vars_allocated;
     } while(0)
 
 // Helper for printing
-#define GET_TAC_TYPE_PRINT_PARAMS(x)    \
+#define TAC_PRINT_PARAMS(x)    \
     (int) get_tac_node_string(x).size, get_tac_node_string(x).data
+
+#define NODE_PRINT_PARAMS(x)    \
+    (int) get_node_string(x).size, get_node_string(x).data
 
 
 typedef struct {
@@ -257,8 +261,8 @@ static expect_tac_expr_ptr_and_dst parse_ast_expr(const expr_ptr expr) {
             ERR_RET_EXPECT_TAC_EXPR_PTR_OR_DST("Failed to parse AST expression (%.*s)", (int) get_node_string(nd_err_type).size, get_node_string(nd_err_type).data);
         }
         const tac_node_type src_type = *expect_src.expr.addr;
-        if (src_type != INT_CONSTANT_TAC_NODE && src_type != VAR_TAC_NODE && src_type != UNARY_OP_TAC_NODE) {
-            ERR_RET_EXPECT_TAC_EXPR_PTR_OR_DST("Unary AST expression failed to become constant or variable (%.*s)", GET_TAC_TYPE_PRINT_PARAMS(src_type)); }
+        if (src_type != INT_CONSTANT_TAC_NODE && src_type != VAR_TAC_NODE && src_type != UNARY_OP_TAC_NODE && src_type != BINARY_OP_TAC_NODE) {
+            ERR_RET_EXPECT_TAC_EXPR_PTR_OR_DST("Unary AST expression failed to become constant or variable (%.*s)", TAC_PRINT_PARAMS(src_type)); }
 
         
         // e.g tmp.0 = ~0
@@ -282,6 +286,57 @@ static expect_tac_expr_ptr_and_dst parse_ast_expr(const expr_ptr expr) {
             return expect;
         }
     } break;
+    
+    case BINARY_OP_NODE: {
+        const binary_op_node bin_op_nd = *((const binary_op_node*) addr);
+
+        const binary_op_type op_type = bin_op_nd.op_type;
+
+        const expr_ptr left_expr = bin_op_nd.left;
+        const expect_tac_expr_ptr_and_dst expect_left = parse_ast_expr(left_expr);
+        if (expect_left.is_error) {
+            const node_type nd_err_type = (node_type) (*left_expr.addr);
+            ERR_RET_EXPECT_TAC_EXPR_PTR_OR_DST("Failed to parse left side of AST binary op (%.*s)", NODE_PRINT_PARAMS(nd_err_type));
+        }
+
+        const tac_node_type left_src_type = *expect_left.expr.addr;
+        if (left_src_type != INT_CONSTANT_TAC_NODE && left_src_type != VAR_TAC_NODE && left_src_type != UNARY_OP_TAC_NODE && left_src_type != BINARY_OP_TAC_NODE) {
+            ERR_RET_EXPECT_TAC_EXPR_PTR_OR_DST("Binary left AST expression failed to become constant or variable (%.*s)", TAC_PRINT_PARAMS(left_src_type)); }
+
+
+        const expr_ptr right_expr = bin_op_nd.right;
+        const expect_tac_expr_ptr_and_dst expect_right = parse_ast_expr(right_expr);
+        if (expect_right.is_error) {
+            const node_type nd_err_type = (node_type) (*right_expr.addr);
+            ERR_RET_EXPECT_TAC_EXPR_PTR_OR_DST("Failed to parse right side of AST binary op (%.*s)", NODE_PRINT_PARAMS(nd_err_type));
+        }
+
+        const tac_node_type right_src_type = *expect_right.expr.addr;
+        if (right_src_type != INT_CONSTANT_TAC_NODE && right_src_type != VAR_TAC_NODE && right_src_type != UNARY_OP_TAC_NODE && right_src_type != BINARY_OP_TAC_NODE) {
+            ERR_RET_EXPECT_TAC_EXPR_PTR_OR_DST("Binary right AST expression failed to become constant or variable (%.*s)", TAC_PRINT_PARAMS(right_src_type)); }
+
+
+        const var_tac_node dst = make_temporary();
+
+        
+        if (expect_left.has_dst && expect_right.has_dst) {
+            const binary_op_tac_node bin_op_tac_nd = make_binary_op_tac_node_has_both_prev(op_type, expect_left.expr, expect_right.expr, expect_left.dst, expect_right.dst, dst);
+            const expect_tac_expr_ptr_and_dst expect = make_expect_tac_expr_ptr_and_dst((const uint8_t*) &bin_op_tac_nd, true, (const uint8_t*) &dst);
+            return expect;
+        } else if (expect_left.has_dst) {
+            const binary_op_tac_node bin_op_tac_nd = make_binary_op_tac_node_has_left_prev(op_type, expect_left.expr, expect_left.dst, expect_right.expr, dst);
+            const expect_tac_expr_ptr_and_dst expect = make_expect_tac_expr_ptr_and_dst((const uint8_t*) &bin_op_tac_nd, true, (const uint8_t*) &dst);
+            return expect;
+        } else if (expect_right.has_dst) {
+            const binary_op_tac_node bin_op_tac_nd = make_binary_op_tac_node_has_right_prev(op_type, expect_left.expr, expect_right.expr, expect_right.dst, dst);
+            const expect_tac_expr_ptr_and_dst expect = make_expect_tac_expr_ptr_and_dst((const uint8_t*) &bin_op_tac_nd, true, (const uint8_t*) &dst);
+            return expect;
+        } else {
+            const binary_op_tac_node bin_op_tac_nd = make_binary_op_tac_node(op_type, expect_left.expr, expect_right.expr, dst);   
+            const expect_tac_expr_ptr_and_dst expect = make_expect_tac_expr_ptr_and_dst((const uint8_t*) &bin_op_tac_nd, true, (const uint8_t*) &dst);
+            return expect;
+        }
+    } break;
 
     case INTEGER_CONSTANT_NODE: {
         const integer_constant_node int_const_nd = *((const integer_constant_node*) addr);
@@ -290,7 +345,6 @@ static expect_tac_expr_ptr_and_dst parse_ast_expr(const expr_ptr expr) {
         const int_constant_tac_node int_const_tac_nd = make_int_constant_tac_node(value);
 
         const expect_tac_expr_ptr_and_dst expect = make_expect_tac_expr_ptr_and_dst((const uint8_t*) &int_const_tac_nd, false, nullptr);
-
         return expect;
     } break;
 
@@ -357,6 +411,7 @@ static expect_tac_node_ptr parse_ast_node(const node_ptr nd) {
             ERR_RET_EXPECT_TAC_NODE_PTR("Failed parse AST return statement expression"); }
 
         var_tac_node src;
+        bool expr_contains_dst = false;
         if (!expect_expr_and_src.has_dst) {
             const var_tac_node tmp = make_temporary(); 
             memcpy(&src, &tmp, sizeof(var_tac_node));
@@ -367,11 +422,13 @@ static expect_tac_node_ptr parse_ast_node(const node_ptr nd) {
 
             const var_tac_node tmp = *( (var_tac_node*) expect_expr_and_src.dst.addr );
             memcpy(&src, &tmp, sizeof(var_tac_node));
+
+            expr_contains_dst = true;
         }
 
         const tac_expr_ptr expr = expect_expr_and_src.expr;
 
-        const return_tac_node ret_tac_nd = make_return_tac_node(expr, src);
+        const return_tac_node ret_tac_nd = make_return_tac_node(expr, expr_contains_dst, src);
 
         const expect_tac_node_ptr expect = make_expect_tac_node_ptr((const uint8_t*) &ret_tac_nd);
 

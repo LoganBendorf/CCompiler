@@ -84,18 +84,15 @@ if (NOT UNWIND_FOUND)
   )
 endif()
 
-# Debug: Print what we're going to link
 message(STATUS "Final UNWIND_LIBRARIES: ${UNWIND_LIBRARIES}")
 
 # Flags
 
 # Sanitizer flags (need for compile and link)
 set(SANITIZER_FLAGS
-    # -fsanitize=address,undefined
-    # -fsanitize=signed-integer-overflow
+    -fsanitize=address,undefined
+    -fsanitize=signed-integer-overflow
 )
-
-# Linker flags specifically for sanitizers
 set(SANITIZER_LINK_FLAGS
     ${SANITIZER_FLAGS}
 )
@@ -119,6 +116,11 @@ set(BASE_C_FLAGS
     -Wno-missing-prototypes # Broken
     -Wno-missing-variable-declarations # Broken
     -Wno-unsafe-buffer-usage # Broken
+    -Wno-covered-switch-default # Conflicts with -Wswitch-default)
+    -Wno-switch-default # Breaks v-table
+    -Wno-cast-function-type-strict # Breaks v-table
+    -Wno-pre-c11-compat #Useless
+    -Wno-float-equal
 
     # Some flags to try
     # -Wcast-qual // Warns on const incorrect casts, pretty good but breaks with some C lib functions
@@ -126,7 +128,7 @@ set(BASE_C_FLAGS
     # -Wunreachable-code-break // Try this one
     -Walloca -Wchar-subscripts 
     -Wdouble-promotion -Wenum-conversion 
-    -Wextra-semi -Wfloat-equal -Wformat-overflow -Wformat-signedness -Wformat=2 
+    -Wextra-semi -Wformat-overflow -Wformat-signedness -Wformat=2 
     -Wframe-larger-than=${DEBUG_MAX_FRAME_SIZE}
     -Wmismatched-tags -Wmissing-braces -Wmultichar 
     -Wpointer-arith -Wrange-loop-construct -Wshadow -Wproperty-attribute-mismatch 
@@ -154,26 +156,41 @@ add_link_options(
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/source")
 
 # Recursively gather all .c files under source/
-file(GLOB_RECURSE SOURCE_FILES
+file(GLOB_RECURSE LIB_SOURCE_FILES
     "${SRC_DIR}/*.c"
 )
 
-include_directories(
+# Remove main.c from the library sources if you have one
+list(FILTER LIB_SOURCE_FILES EXCLUDE REGEX ".*main\\.c$")
+
+add_library(crapiler_lib STATIC ${LIB_SOURCE_FILES})
+
+target_include_directories(crapiler_lib PUBLIC
     ${SRC_DIR}
     ${SRC_DIR}/ast
     ${SRC_DIR}/tac
     ${SRC_DIR}/codegen
+    ${SRC_DIR}/lib
+    ${UNWIND_INCLUDE_DIRS}
 )
 
+target_link_libraries(crapiler_lib PUBLIC 
+    ${UNWIND_LIBRARIES}
+    unwind-x86_64
+    dl
+)
 
+# Main executable
 add_executable(crapiler
-    ${SOURCE_FILES}
+    ${SRC_DIR}/main.c  # or whatever your main file is called
 )
+
+target_link_libraries(crapiler PRIVATE crapiler_lib)
 
 # Tell the compiler where to look for libunwind.h
 target_include_directories(crapiler PRIVATE ${UNWIND_INCLUDE_DIRS})
 
-# Link both libunwind libraries explicitly
+# Link libunwind libraries
 target_link_libraries(crapiler PRIVATE 
     ${UNWIND_LIBRARIES}
     # Fallback: ensure we have the arch-specific library even if detection failed
@@ -181,3 +198,18 @@ target_link_libraries(crapiler PRIVATE
     # Add dl for dladdr support
     dl
 )
+
+
+
+option(COMPILE_TESTS "Compile tests" ON)
+
+# Tests
+if(COMPILE_TESTS)
+  set(TEST_DIR "${PROJECT_SOURCE_DIR}/tests")
+
+  add_executable(short_vec_test ${TEST_DIR}/lib/short_vec_test.c)
+  target_link_libraries(short_vec_test PRIVATE crapiler_lib)
+  set_target_properties(short_vec_test PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY tests
+  )
+endif()

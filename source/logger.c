@@ -120,10 +120,13 @@ void format_unwind_str(char* input) {
     }
     at_index += 2;
 
-    size_t source_index = at_index;
-    const char* source_str = "source";
-    while (strncmp(input + source_index, source_str, strlen(source_str)) != 0) {
+    size_t       source_index   = at_index;
+    const char*  source_str     = "source";
+    const size_t source_str_len = strlen(source_str);
+    size_t       other_str_len = strlen(input + source_index);
+    while (strncmp(input + source_index, source_str, other_str_len >= source_str_len ? source_str_len : other_str_len ) != 0) {
         source_index += 1;
+        other_str_len = strlen(input + source_index);
     }
 
     // lol

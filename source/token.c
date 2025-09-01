@@ -18,7 +18,7 @@ string_span token_span() {
                      {"NULL_TOKEN", 10}, {"OPEN_PAREN", 10}, {"CLOSE_PAREN", 11}, 
                      {"OPEN_BRACE", 10}, {"CLOSE_BRACE", 11},
                       {"INT_LIT", 7}, {"IDENTIFIER", 10}, {"SEMICOLON", 9}, {"LINE_END", 8}, {"C_TYPE", 6},
-                      {"DECREMENT", 9}, {"BITWISE_COMPLEMENT", 18}, {"MINUS", 5},
+                      {"DECREMENT", 9}, {"BITWISE_COMPLEMENT", 18}, {"MINUS", 5}, {"PLUS", 4}, {"ASTERISK", 8}, {"FORWARD_SLASH", 13}, {"PERCENT", 7},
                         {"main", 4}, {"return", 6}, {"if", 2}, 
                         {"int", 3}, {"void", 4}
                     };

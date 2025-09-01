@@ -120,6 +120,21 @@ bool lex(const string* set_input) {
     case ' ': col++; input_pos++; break;
     case '\t': col+= 4 /*???*/; input_pos++; break;
 
+    case '+': {
+        add_token(PLUS, (string){"+", 1});
+        input_pos++;
+        col++;
+    } break;
+    case '*': {
+        add_token(ASTERISK, (string){"*", 1});
+        input_pos++;
+        col++;
+    } break;
+    case '%': {
+        add_token(PERCENT, (string){"%%", 1});
+        input_pos++;
+        col++;
+    } break;
     case '-': {
         input_pos++;
         if (input_pos < input->size && cur_char() == '-') {
@@ -137,11 +152,14 @@ bool lex(const string* set_input) {
     } break;
     case '/': {
         if (input_pos + 1 >= input->size) {
-            LOG_ERR("Singular '/' on line '%.*s'", (int) chars_till_line_end(), line_start);
-            return false;
+            add_token(FORWARD_SLASH, (string){"/", 1});
+            input_pos++;
+            col++;
+            break;
         } 
 
         input_pos++;
+        col++;
 
         bool multi_line_comment_terminated = true;
         if (cur_char() == '/' ) {
@@ -164,8 +182,8 @@ bool lex(const string* set_input) {
 
             input_pos += 2;
         } else {
-            LOG_ERR("Singular '/' on line '%.*s'", (int) chars_till_line_end(), line_start);
-            return false;
+            add_token(FORWARD_SLASH, (string){"/", 1});
+            break;
         }
 
         if (!multi_line_comment_terminated) {

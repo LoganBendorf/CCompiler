@@ -10,67 +10,49 @@
 
 
 
-#define ASM_NODE_STACK_SIZE 1024 * 16
-
-
-
 void print_g_asm_nodes(const string msg);
 [[nodiscard]] string get_asm_node_string(const size_t index);
 
-void   set_top_traversal_index(const size_t val);
-size_t get_g_asm_node_stack_top_value();
-int    get_elem_size_index();
-void   set_elem_size_traversal_index(const int val);
-
 typedef enum { PROGRAM_ASM_NODE, FUNCTION_ASM_NODE, INT_IMMEDIATE_ASM_NODE,
                MOVE_ASM_NODE, RETURN_ASM_NODE, BLOCK_ASM_NODE, UNARY_OP_ASM_NODE, REGISTER_ASM_NODE, STACK_LOCATION_ASM_NODE, IDENTIFIER_ASM_NODE,
-               TEMP_REG_ASM_NODE
+               TEMP_REG_ASM_NODE, ASM_NODE_LINKED_PTR
 } asm_node_type;
 
 [[nodiscard]] bool is_operandanble(const asm_node_type type);
 
 
 typedef struct {
-    const size_t allignment;
-    size_t       top;
-    uint8_t      stack[ASM_NODE_STACK_SIZE];
-} asm_node_stack;
+    uint8_t* addr;
+} asm_node_ptr;
+
 
 typedef struct {
     uint8_t* addr;
-    const bool     is_none;
-} asm_node_stack_ptr;
-
-[[nodiscard]] asm_node_stack_ptr get_top_of_g_asm_node_stack();
-[[nodiscard]] asm_node_stack_ptr pop_g_asm_node_stack();
-
-typedef struct {
-    const uint8_t* addr;
-} asm_node_ptr;
-
-void push_g_asm_node_stack(const asm_node_ptr ptr);
-
-typedef struct {
-    const uint8_t* addr;
 } asm_expr_ptr;
 
 
 typedef struct {
-    const asm_node_ptr* values;
-    const size_t     size;
+    asm_node_ptr* values;
+    const size_t  size;
 } asm_node_ptr_array;
 
 typedef struct {
-     const uint8_t* addr;
+    const uint8_t* addr;
 } asm_operand_ptr;
 
 
+typedef struct {
+    const asm_node_type type;
+    asm_expr_ptr        prev;
+    asm_expr_ptr        cur;
+} asm_node_linked_ptr;
 
+[[nodiscard]] asm_node_linked_ptr make_asm_node_linked_ptr(asm_expr_ptr set_prev, asm_expr_ptr set_cur);
 
 
 typedef struct {
     const asm_node_type      type;
-    const asm_node_ptr_array nodes;
+          asm_node_ptr_array nodes;
 } block_asm_node;
 
 [[nodiscard]] block_asm_node make_block_asm_node(const asm_node_ptr_array set_nodes);
@@ -78,7 +60,7 @@ typedef struct {
 typedef struct {
     const asm_node_type  type;
     const string         name;
-    const block_asm_node nodes;
+          block_asm_node nodes;
     int stack_allocate_ammount;
 } function_asm_node;
 
@@ -88,7 +70,7 @@ typedef struct {
 
 typedef struct {
     const asm_node_type     type;
-    const function_asm_node main_function;
+          function_asm_node main_function;
 } program_asm_node;
 
 [[nodiscard]] program_asm_node make_program_asm_node(const function_asm_node set_func);
@@ -141,31 +123,33 @@ typedef struct {
     const asm_node_type      type;
     const unary_op_type      op_type;
     const bool               has_prev;
-    const asm_expr_ptr       prev;
-    const asm_expr_ptr       src; // Can be constants or regs
-    const register_asm_node* dst_reg;
+          asm_expr_ptr       prev;
+          asm_expr_ptr       src; // Can be constants or regs
+          register_asm_node* dst_reg;
 } unary_op_asm_node;
 
-[[nodiscard]] unary_op_asm_node make_unary_op_asm_node(const unary_op_type op_type, const asm_expr_ptr set_src, const register_asm_node* set_dst);
-[[nodiscard]] unary_op_asm_node make_unary_op_asm_node_wth_previous(const unary_op_type op_type, const asm_expr_ptr prev, const asm_expr_ptr set_src, const register_asm_node* set_dst);
+[[nodiscard]] unary_op_asm_node make_unary_op_asm_node(const unary_op_type op_type, const asm_expr_ptr set_src, register_asm_node* set_dst);
+[[nodiscard]] unary_op_asm_node make_unary_op_asm_node_wth_previous(const unary_op_type op_type, const asm_expr_ptr prev, const asm_expr_ptr set_src, register_asm_node* set_dst);
 
 
 typedef struct {
     const asm_node_type     type;
-    const register_asm_node* src;
-    const register_asm_node* dst;
+          register_asm_node* src;
+          register_asm_node* dst;
 } move_asm_node;
 
-[[nodiscard]] move_asm_node make_move_asm_node(const register_asm_node* set_src, const register_asm_node* set_dst);
+[[nodiscard]] move_asm_node make_move_asm_node(register_asm_node* set_src, register_asm_node* set_dst);
 
 
 typedef struct {
     const asm_node_type type;
-    const asm_expr_ptr  expr;
-    const move_asm_node move_nd;
+          asm_expr_ptr  expr;
+    const bool expr_contains_dst;
+          move_asm_node move_nd;
 } return_asm_node;
 
 [[nodiscard]] return_asm_node make_return_asm_node(const asm_expr_ptr set_expr, const move_asm_node set_move_nd);
+[[nodiscard]] return_asm_node make_return_asm_node_without_move(const asm_expr_ptr set_expr);
 
 typedef struct { // '-' for push & '+' for pop
     const asm_node_type type;

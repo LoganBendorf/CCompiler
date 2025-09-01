@@ -1,9 +1,9 @@
 #pragma once
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <execinfo.h>  // For backtrace
 #include <unistd.h>
+#include <stdio.h>
 
 
 void print_stack_trace();
@@ -14,6 +14,7 @@ const char* YELLOW();
 const char* RED();
 const char* RESET();
 
+extern bool TEST;
 
 #define FATAL_ERROR(fmt, ...) \
     do { \

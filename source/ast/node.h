@@ -3,54 +3,31 @@
 #include "structs.h"
 #include "token.h"
 #include "unary_op.h"
+#include "binary_op.h"
 
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 
-
-#define NODE_STACK_SIZE 1024 * 16
-
-
-
 typedef enum { NULL_NODE, PROGRAM_NODE, FUNCTION_NODE, IDENTIFIER_NODE, BLOCK_STATEMENT_NODE, STATEMENT_NODE, RETURN_STATEMENT_NODE, INTEGER_CONSTANT_NODE, IF_STATEMENT_NODE,
                CUSTOM_TYPE_NODE, C_TYPE_NODE, TYPE_NODE, UNARY_OP_NODE, BINARY_OP_NODE
 } node_type;
-
-typedef enum {
-    NONE_EXIST_YET_RN_FR_FR,
-    ADD_OP, SUB_OP, MUL_OP, DIV_OP,
-    EQUALS_OP, NOT_EQUALS_OP, LESS_THAN_OP, LESS_THAN_OR_EQUAL_TO_OP, GREATER_THAN_OP, GREATER_THAN_OR_EQUAL_TO_OP,
-    DOT_OP
-} binary_op_type;
-
 
 
 [[nodiscard]] bool is_expression(const node_type type);
 [[nodiscard]] bool is_statement (const node_type type);
               void print_g_nodes(void);
 [[nodiscard]] string get_node_string(const size_t index);
+[[nodiscard]] size_t node_addr_to_str(const uint8_t* addr, char* buf, const size_t buf_size, size_t index);
 
-typedef struct {
-    const size_t allignment;
-    size_t       top;
-    uint8_t      stack[NODE_STACK_SIZE];
-} node_stack;
 
-typedef struct {
-    const uint8_t* addr;
-    const bool     is_none;
-} node_stack_ptr;
 
 typedef struct {
     const uint8_t* addr;
     const bool     is_none;
 } node_ptr;
 
-
-void push_g_node_stack(const node_ptr ptr);
-[[nodiscard]] node_stack_ptr get_top_of_g_node_stack();
 
 typedef struct {
     const node_ptr* values;
@@ -89,6 +66,15 @@ typedef struct {
 } unary_op_node;
 
 [[nodiscard]] unary_op_node make_unary_op_node(const unary_op_type set_op_type, const expr_ptr set_expr);
+
+typedef struct {
+    const node_type      type;
+    const binary_op_type op_type;
+    const expr_ptr       left;
+    const expr_ptr       right;
+} binary_op_node;
+
+[[nodiscard]] binary_op_node make_binary_op_node(const binary_op_type set_op_type, const expr_ptr set_left, const expr_ptr set_right);
 
 
 typedef struct {

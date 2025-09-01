@@ -2,6 +2,7 @@
 #include "parser.h"
 
 #include "node.h"
+#include "node_mem.h"
 #include "logger.h"
 #include "token.h"
 #include "macros.h"
@@ -27,7 +28,7 @@ static size_t   stmt_pool_index;
 
 
 typedef enum {
-    LOWEST = 0, PREFIX = 6, HIGHEST = 255
+    LOWEST = 0, PREFIX = 2, HIGHEST = 255
 } precedences;  
 
 typedef struct {
@@ -117,6 +118,14 @@ typedef struct {
         push_err_ret_expect_stmt_ptr(fmt __VA_OPT__(,) __VA_ARGS__);    \
     }                                                                   \
     } while (0)
+
+// Input is type
+#define TOKEN_PRINT_PARAMS(x) \
+    (int) get_token_string(x).size, get_token_string(x).data
+
+#define EXPR_PTR_PRINT_PARAMS(x) \
+    (int) get_node_string(*x.addr).size, get_node_string(*x.addr).data
+
 
 
 
@@ -254,38 +263,30 @@ static expect_stmt_ptr make_expect_stmt_ptr(const uint8_t* node_addr) {
     return (expect_stmt_ptr){false, {{stack_ptr.addr}}};
 }
 
-[[maybe_unused]] static size_t numeric_operator_precedence(const binary_op_type type) {
+static size_t binary_op_precedence(const binary_op_type type) {
     switch (type) {
-        case EQUALS_OP:         return 2; break;
-        case NOT_EQUALS_OP:     return 2; break;
-        case LESS_THAN_OP:      return 3; break;
-        case GREATER_THAN_OP:   return 3; break;
-        case ADD_OP:            return 4; break;
-        case SUB_OP:            return 4; break;
-        case MUL_OP:            return 5; break;
-        case DIV_OP:            return 5; break;
-        default:
-            return LOWEST;
+        case ADD_OP:            return 11;
+        case SUB_OP:            return 11;
+        case MUL_OP:            return 12;
+        case DIV_OP:            return 12;
+        case MOD_OP:            return 12;
+        default: return LOWEST;
     }
 }
 
+// Infix precedence I think
 static size_t numeric_precedence(const token_type type) {
     switch (type) {
-        // case AS:            return 1; break; 
-        // case WHERE:         return 1; break; 
-        // case LEFT:          return 1; break; 
-        // case EQUAL:         return 2; break;
-        // case NOT_EQUAL:     return 2; break;
-        // case LESS_THAN:     return 3; break;
-        // case GREATER_THAN:  return 3; break;
-        // case PLUS:          return 4; break;
-        // case MINUS:         return 4; break;
-        // case ASTERISK:      return 5; break;
-        // case SLASH:         return 5; break;
-        case OPEN_PAREN:    return 7; break;
-        case OPEN_BRACE:  return 8; break;
-        default:
-            return LOWEST;
+    case PLUS:          return 11;
+    case MINUS:         return 11;
+    case ASTERISK:      return 12;
+    case FORWARD_SLASH: return 12;
+    case PERCENT:       return 12;
+
+    case OPEN_PAREN:    return 15;
+    case OPEN_BRACE:    return 15;
+    default:
+        return LOWEST;
     }
 }
 
@@ -295,14 +296,14 @@ static expect_stmt_ptr parse_c_type_stmt(const token tok) {
 
     const type_node c_type_nd = make_type_node_c_type_token(tok.type); // I guess this can be passed by value sometimes, custom types can't though
  
-    advance_and_check_ret_expect_stmt_ptr("No values after (%.*s)", (int) get_token_string(tok.type).size, get_token_string(tok.type).data);
+    advance_and_check_ret_expect_stmt_ptr("No values after (%.*s)", TOKEN_PRINT_PARAMS(tok.type));
 
     if (!is_identifier(peek_type())) { // Just something like void
         const expect_stmt_ptr expect = make_expect_stmt_ptr((const uint8_t*) &c_type_nd);
         return expect;
     }
 
-    const expect_expr_ptr ident_expr = parse_expression(LOWEST, peek());
+    const expect_expr_ptr ident_expr = parse_expression(HIGHEST, peek());
     if (ident_expr.is_error) {
         push_err_ret_expect_stmt_ptr("Failed to parse C type statement"); }
 
@@ -462,12 +463,16 @@ static expect_expr_ptr parse_prefix_expression(const token tok) {
     case OPEN_PAREN: {
         advance_and_check_ret_expect_expr_ptr("No values after open parenthesis");
 
-        const expect_expr_ptr expr = parse_expression(HIGHEST, peek());
+        const expect_expr_ptr expr = parse_expression(LOWEST, peek());
         if (expr.is_error) {
             push_err_ret_expect_expr_ptr("Failed to parse expression in parenthesis"); }
 
         if (peek_type() != CLOSE_PAREN) {
-            push_err_ret_expect_expr_ptr("Expected closing parenthesis, got (%.*s)", (int) get_token_string(peek_type()).size, get_token_string(peek_type()).data);}
+            char buf[512];
+            const size_t size = node_addr_to_str(expr.expression.addr, buf, 512, 0);
+
+            push_err_ret_expect_expr_ptr("Expected closing parenthesis, got (%.*s). For expression (%.*s)", TOKEN_PRINT_PARAMS(peek_type()), (int) size, buf);
+        }
 
         advance_and_check_ret_expect_expr_ptr("No values after closing parenthesis");
 
@@ -502,6 +507,50 @@ static expect_expr_ptr parse_prefix_expression(const token tok) {
     }
 }
 
+
+
+static expect_expr_ptr parse_binary_infix_expression(const expr_ptr left) {
+
+    const token_type type = peek_type();
+
+    binary_op_type op;
+    switch (type) {
+    case PLUS:          op = ADD_OP; break;
+    case MINUS:         op = SUB_OP; break;
+    case ASTERISK:      op = MUL_OP; break;
+    case FORWARD_SLASH: op = DIV_OP; break;
+    case PERCENT:       op = MOD_OP; break;
+    default: 
+    push_err_ret_expect_expr_ptr("No infix binary expression for (%.*s)", TOKEN_PRINT_PARAMS(type));
+    }
+
+    advance_and_check_ret_expect_expr_ptr("No right hand of infix expression");
+
+    const size_t precedence = binary_op_precedence(op);
+
+    const expect_expr_ptr right = parse_expression(precedence, peek());
+    if (right.is_error) {
+    push_err_ret_expect_expr_ptr("Failed to parse right hand of expression"); }
+
+    const binary_op_node bin_op_nd = make_binary_op_node(op, left, right.expression);
+
+    const expect_expr_ptr expect = make_expect_expr_ptr((const uint8_t*) &bin_op_nd);
+    return expect;
+}
+
+static expect_expr_ptr parse_infix_expression(const expr_ptr left) {
+
+    const token_type type = peek_type();
+
+    switch (type) {
+    case PLUS: case MINUS: case ASTERISK: case FORWARD_SLASH: case PERCENT:
+        return parse_binary_infix_expression(left);
+    default:
+        push_err_ret_expect_expr_ptr("No infix expression function for (%.*s)", EXPR_PTR_PRINT_PARAMS(left));
+    }
+
+}
+
 static expect_expr_ptr parse_expression(const size_t precedence, const token tok) {
     
     // std::cout << "parse_expression called with " << token_type_to_string(peek_type()) << std::endl;
@@ -517,19 +566,18 @@ static expect_expr_ptr parse_expression(const size_t precedence, const token tok
         //    peek_type() != COMMA && 
            precedence < numeric_precedence(peek_type()) ) {
             const expect_expr_ptr prev_left = left; // Having prev_left allows for no-ops
-            // const expect_expr_ptr left = infix_parse_expression(left);
-            // if (left.is_error) {
-            //     return left;
-            // } 
+            const expect_expr_ptr temp = parse_infix_expression(left.expression);
+            memcpy(&left, &temp, sizeof(expect_expr_ptr));
+            if (left.is_error) {
+                return left;
+            } 
 
             if (left.expression.addr == prev_left.expression.addr) {
                 break; 
             }
-
-            break;
         }     
         
-    return left;
+        return left;
 }
 
 
